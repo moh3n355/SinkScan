@@ -1,5 +1,5 @@
 (function () {
-  const SINK_PATTERNS = {
+  const BASE_SINK_PATTERNS = {
     'HTML Execution': [
       /\.innerHTML/, /\.outerHTML/, /\.insertAdjacentHTML\s*\(/,
       /document\.write(ln)?\s*\(/, /\.srcdoc/, /DOMParser\s*\(/,
@@ -22,36 +22,54 @@
       /document\.domain\s*=/
     ],
     'Attribute': [
-      /\.setAttribute\s*\(/, /\.setAttributeNS\s*\(/, /\.attributes\[/,
-      /\bon(click|error|load|mouseover|focus|input|change)\s*=/,
-      /\.style\.cssText\s*=/
+      /\.setAttribute\s*\(\s*["'`](href|src|srcdoc|action|formaction|style|on\w+)["'`]/
     ],
     'jQuery': [
-      /\$\s*\(/, /jQuery\s*\(/, /\.html\s*\(/,
+      /\$\s*\(\s*(location|window|document)/, /\.html\s*\(/,
       /\.append\s*\(/, /\.prepend\s*\(/, /\.after\s*\(/, /\.before\s*\(/,
-      /\.replaceWith\s*\(/, /\.wrap(All|Inner)?\s*\(/, /\.add\s*\(/,
-      /\.attr\s*\(/, /\.prop\s*\(/, /\.load\s*\(/,
-      /\$\.parseHTML/, /\$\.globalEval/, /\$\.getScript/, /\$\.ajax/,
-      /:contains\s*\(/
+      /\.replaceWith\s*\(/, /\.wrap(All|Inner)?\s*\(/,
+      /\$\.parseHTML/, /\$\.globalEval/, /\$\.getScript/
     ],
     'Framework': [
       /dangerouslySetInnerHTML/, /v-html/, /\{@html/, /\[innerHTML\]/,
       /bypassSecurityTrust(Html|Script|Url|ResourceUrl|Style)/,
-      /ng-bind-html/, /\$sce\.trustAs/, /\$compile\s*\(/,
-      /\$eval\s*\(/, /\$watch\s*\(/, /\{\{.*\}\}/
+      /ng-bind-html/, /\$sce\.trustAs/, /\$compile\s*\(/
     ],
     'Network / Storage': [
       /postMessage\s*\(/, /addEventListener\s*\(\s*["']message["']/,
       /XMLHttpRequest\s*\(\s*\)\.open/, /fetch\s*\(/, /new\s+WebSocket\s*\(/,
-      /navigator\.sendBeacon/, /history\.pushState\s*\(/,
-      /history\.replaceState\s*\(/, /document\.cookie\s*=/,
-      /localStorage\.setItem/, /sessionStorage\.setItem/
+      /navigator\.sendBeacon/
     ],
     'Prototype Pollution': [
       /Object\.assign\s*\(/, /\b(merge|extend|deepMerge|defaultsDeep)\s*\(/,
-      /__proto__/, /\.constructor\.prototype/, /JSON\.parse\s*\(/
+      /__proto__/, /\.constructor\.prototype/
     ]
   };
+
+  const FULL_EXTRA = {
+    'Attribute': [/\.setAttribute\s*\(/, /\.setAttributeNS\s*\(/, /\.attributes\[/, /\.style\.cssText\s*=/],
+    'jQuery': [/\.add\s*\(/, /\.attr\s*\(/, /\.prop\s*\(/, /\.load\s*\(/, /\$\.ajax/, /:contains\s*\(/],
+    'Framework': [/\$eval\s*\(/, /\$watch\s*\(/, /\{\{.*\}\}/],
+    'Navigation / URL': [/history\.(pushState|replaceState)\s*\(/],
+    'Network / Storage': [
+      /history\.(pushState|replaceState)\s*\(/, /document\.cookie\s*=/,
+      /localStorage\.setItem/, /sessionStorage\.setItem/
+    ],
+    'Prototype Pollution': [/JSON\.parse\s*\(/]
+  };
+
+  function buildPatterns(mode) {
+    const patterns = {};
+    for (const [cat, list] of Object.entries(BASE_SINK_PATTERNS)) {
+      patterns[cat] = [...list];
+    }
+    if (mode === 'full') {
+      for (const [cat, extra] of Object.entries(FULL_EXTRA)) {
+        patterns[cat] = [...(patterns[cat] || []), ...extra];
+      }
+    }
+    return patterns;
+  }
 
   function scanText(text, sourceName, patterns, findings, seen) {
     for (const [category, list] of Object.entries(patterns)) {
@@ -74,17 +92,19 @@
     }
   }
 
-  window.sinkScan = async function (categories = null) {
-    let filtered = SINK_PATTERNS;
+  window.sinkScan = async function (mode = 'strict', categories = null) {
+    const patterns = buildPatterns(mode);
+
+    let filtered = patterns;
     if (categories) {
       const list = Array.isArray(categories) ? categories : [categories];
       filtered = {};
       for (const cat of list) {
-        if (!SINK_PATTERNS[cat]) {
-          console.warn('Unknown category:', cat, '| Valid:', Object.keys(SINK_PATTERNS));
+        if (!patterns[cat]) {
+          console.warn('Unknown category:', cat, '| Valid:', Object.keys(patterns));
           continue;
         }
-        filtered[cat] = SINK_PATTERNS[cat];
+        filtered[cat] = patterns[cat];
       }
       if (Object.keys(filtered).length === 0) return;
     }
@@ -115,7 +135,7 @@
 
     window.__sinkFindings = findings;
 
-    console.log(`%cSink Scan Results${categories ? ' (categories: ' + (Array.isArray(categories) ? categories.join(', ') : categories) + ')' : ''}`, 'font-weight:bold;font-size:14px');
+    console.log(`%cSink Scan Results (mode: ${mode}${categories ? ', categories: ' + (Array.isArray(categories) ? categories.join(', ') : categories) : ''})`, 'font-weight:bold;font-size:14px');
     for (const [cat, items] of Object.entries(findings)) {
       console.groupCollapsed(`${cat} (${items.length})`);
       console.table(items);
